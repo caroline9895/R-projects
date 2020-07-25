@@ -1,0 +1,430 @@
+# The data for this study come from a high resolution (4-k grid spacing) climate change simulation over northern Mexico, all of the continental U.S., and southern Canada using the Weather Research and Forecasting (WRF) model conducted by Liu et al.
+
+# Oour goal is to explore and evaluate the predictive performance of first and second order spatio-temporal models for maximum temperature observations within the San Diego City boundary using latitude, longitude and time as predictors.
+
+###############################################
+######## Extracting the data in CA ############
+###############################################
+
+### 1. Get the boundary of CA 
+
+library("sp")
+
+library(rappdirs)
+user_cache_dir()
+library(tigris)
+options(tigris_use_cache = TRUE)
+
+us=states(cb=TRUE)
+CA=us[us$NAME=="California",]
+class(CA)
+CA_proj=spTransform(CA, CRS("+proj=longlat")) 
+
+
+### 2. Read the .nc data into R
+
+library("ncdf4")
+library("tidync")
+library("raster")
+library("spacetime")
+
+MAXT.nc<-nc_open("E:/SDSU-statistics/Stat-696 spatio/696project/future_MAXT_2000.nc.nc")
+MINT.nc<-nc_open("E:/SDSU-statistics/Stat-696 spatio/696project/future_MINT_2000.nc.nc")
+PREC.nc<-nc_open("E:/SDSU-statistics/Stat-696 spatio/696project/future_PREC_2000.nc.nc")
+
+### 3. Make a spatialpointDataFrame of the data all over the North America
+
+XLAT <- ncvar_get(nc = MAXT.nc, varid = "XLAT")
+XLONG <- ncvar_get(nc = MAXT.nc, varid = "XLONG")
+MAXT_coords <- data.frame("XLONG" = rep(c(XLONG),times=92), 
+                          "XLAT" = rep(c(XLAT), times=92))
+MAXT <- ncvar_get(nc = MAXT.nc, varid = "MAXT")
+MINT <- ncvar_get(nc = MINT.nc, varid = "MINT")
+PREC <- ncvar_get(nc = PREC.nc, varid = "PREC")
+
+sp_world <- SpatialPointsDataFrame(coords = MAXT_coords, 
+                                   data = data.frame("MAXT" = c(MAXT),
+                                                     "MINT"=c(MINT),
+                                                     "PREC"=c(PREC)),
+                                   proj4string = CRS("+proj=longlat"))
+
+### 4. Extracting the data of CA
+
+a=sp_world[1:(1359*1015),]
+sp_CA <- a[CA_proj, c('MAXT','MINT','PREC')]
+dim(sp_CA)
+
+i=1+(1359*1015)
+while (i<=1359*1015*92) {
+  a=sp_world[i:(i+1359*1015-1),]
+  b=a[CA_proj, c('MAXT','MINT','PREC')]
+  sp_CA=rbind(sp_CA, b)
+  i=i+(1359*1015)
+}
+dim(sp_CA)
+
+save(sp_CA, file="sp_CA.RData")
+
+##############################################################################
+######## Build a spatio-temporal full grid layout data structures ############
+##############################################################################
+
+tunits <- ncatt_get(MAXT.nc,"Time","units") # get attribute information for units of time
+tunits # says time information is stored in days since 2000-10-01
+start.date = as.Date("2000-10-01") # Set start date as indicated in units
+times.days <-ncvar_get(MAXT.nc,"Time")# Extract time info
+dates <- start.date + times.days # add the days to start date create a more familiar format of dates
+
+load("sp_CA.RData")
+b=sp_CA[1:(length(sp_CA)/92),]
+dates <- seq(as.Date("2000-10-01"), by = "day", l = 92)
+CA_STFDF <- STFDF(sp = SpatialPoints(b), 
+                  time = dates, 
+                  data = as.data.frame(sp_CA)[,c("MAXT","MINT","PREC")])
+format(object.size(CA_STFDF), units = "MB")
+
+#####################################
+######## Visualization   ############
+#####################################
+
+### 1.MAXT aggragate by week
+
+MAXT_we <- aggregate(CA_STFDF[,,"MAXT"], "week", max)
+format(object.size(MAXT_we), "MB")
+stplot(MAXT_we)
+
+### 2.MINT aggregate by week
+
+MINT_we <- aggregate(CA_STFDF[,,"MINT"], "week", min)
+#format(object.size(MINT_we), "MB")
+stplot(MINT_we)
+
+### 3.PREC aggregate by week
+
+PREC_we <- aggregate(CA_STFDF[,,"PREC"], "week", mean)
+#format(object.size(PREC_we), "MB")
+stplot(PREC_we, colorkey=TRUE, col.regions=hsv(1, seq(0,1,length.out = 100), 1))
+
+#####################################
+########   variogram   ##############
+#####################################
+
+### 1. empirical
+
+library("gstat") ## need an old version of this package
+proj4string(CA_STFDF) <- CRS("+proj=longlat")
+
+#day_cols <- rainbow(length(dates))
+#emp_vgm_sp_CA <- variogram(MAXT ~ 1, data = CA_STFDF[, '2000-10-01',"MAXT"])
+#plot(emp_vgm_sp_CA$dist, emp_vgm_sp_CA$gamma, type = "n", xlim=c(0,400), ylim=c(0,40),
+#     xlab = "distance (meters)", ylab = "semivariance")
+#for (i in 1:92){
+#  emp_vgm_sp_CA <- variogram(MAXT ~ 1, data=CA_STFDF[, dates[i], "MAXT"])
+#  lines(emp_vgm_sp_CA$dist, emp_vgm_sp_CA$gamma, col = day_cols[i])
+#}
+#legend("topleft", lty = 1, col = day_cols, legend = dates, bty = "n")
+
+emp_vgm_st_CA <- variogram(MAXT ~ 1, data = CA_STFDF[,,"MAXT"], cutoff=400, width = 40, tlags = 0:14) 
+plot(emp_vgm_st_CA)
+# time consuming- so reduce the range from CA state to SD county
+
+
+############################################################################################
+############################################################################################
+############                             ###################################################
+############  Focus on San Diego County  ###################################################
+############                             ###################################################
+############################################################################################
+############################################################################################
+
+
+#####################################################
+########   Extracting the data in SD   ##############
+#####################################################
+library("sp")
+library("spacetime")
+
+
+### 1. Get the boundary of SD
+load("city_boundary.RData")
+SD_proj=spTransform(sd_city, CRS("+proj=longlat"))
+
+### 2. Extracting the data
+load("sp_CA.RData")
+sp_SD=sp_CA[SD_proj, c('MAXT','MINT','PREC')]
+save(sp_SD,file="sp_SD.RData")
+
+### 3. Construct the spacetime structure
+load("sp_SD.RData")
+b=sp_SD[1:(length(sp_SD)/92),]
+dates <- seq(as.Date("2000-10-01"), by = "day", l = 92)
+SD_STFDF <- STFDF(sp = SpatialPoints(b), 
+                  time = dates, 
+                  data = as.data.frame(sp_SD[,"MAXT"]))
+format(object.size(SD_STFDF), units = "MB")
+proj4string(SD_STFDF) <- CRS("+proj=longlat")
+
+#########################################
+########   visualization   ##############
+#########################################
+
+### 1. Histogram of Average Maximum Temperature
+AV_MAXT=aggregate(SD_STFDF, "3 months" , mean)
+hist(as.data.frame(AV_MAXT)$MAXT,breaks=seq(293,300,1), main="Histogram of Average Maximum Temperature", xlab="Average Maximum Temperature")
+
+### 2. Histogram of overall Maximum temperature
+hist(as.data.frame(SD_STFDF)$MAXT, main="Histogram of Maximum Temperature", xlab="Average Maximum Temperature")
+
+### 3. a whole picture of the MAXT change in SD
+MAXT_we <- aggregate(SD_STFDF, "week", median)
+format(object.size(MAXT_we), "MB")
+stplot(MAXT_we, colorkey=TRUE)
+
+#####################################
+########   variogram   ##############
+#####################################
+
+### 1. load a older version of package "gstat"
+
+# library("usethis")
+# library("memoise")
+# library("desc")
+# library("pkgbuild")
+# library("pkgload")
+# library("remotes")
+# library("sessioninfo")
+# library("devtools")
+
+require(devtools)
+install_version("gstat", version = "2.0-0")
+
+## Another way to get a older version of package "gstat"
+# url_gstat_old="https://cran.rstudio.com/src/contrib/Archive/gstat/gstat_2.0-0.tar.gz"
+# install.packages(url_gstat_old, repos=NULL, type="source")
+
+library("gstat")
+packageVersion("gstat")
+
+### 2. variogram on a single day
+
+day_cols <- rainbow(length(dates))
+{
+  emp_vgm_sp_SD <- variogram(MAXT ~ 1, data = SD_STFDF[, '2000-10-01'])
+  plot(emp_vgm_sp_SD$dist, emp_vgm_sp_SD$gamma, type = "n", xlim=c(0,30), ylim=c(0,8),
+       xlab = "Distance(km)", ylab = "Semivariance")
+  for (i in 1:92){
+    emp_vgm_sp_SD <- variogram(MAXT ~ 1, data=SD_STFDF[, dates[i]])
+    points(emp_vgm_sp_SD$dist, emp_vgm_sp_SD$gamma, col = day_cols[i])
+  }
+  legend("topright", lty = 1, col = day_cols, legend = dates, bty = "n")
+} 
+
+### 3. spatial temporal variograms
+emp_vgm_st_SD <- variogram(MAXT ~ 1, data = SD_STFDF) 
+plot(emp_vgm_st_SD)
+
+############################################
+########   construct models   ##############
+############################################
+
+### using the first two months to construct the models and use the last one to test, redo the variogram part.
+
+SD_STFDF_train=SD_STFDF[,"2000-10-01::2000-11-30"]
+day_cols <- rainbow(92)
+{
+  emp_vgm_sp_SD <- variogram(MAXT ~ 1, data = SD_STFDF_train[, '2000-10-01'])
+  plot(emp_vgm_sp_SD$dist, emp_vgm_sp_SD$gamma, type = "n", xlim=c(0,30), ylim=c(0,8),
+       xlab = "Distance(km)", ylab = "Semivariance")
+  for (i in 1:61){
+    emp_vgm_sp_SD <- variogram(MAXT ~ 1, data=SD_STFDF_train[, dates[i]])
+    points(emp_vgm_sp_SD$dist, emp_vgm_sp_SD$gamma, col = day_cols[i])
+  }
+  legend("topright", lty = 1, col = day_cols, legend = dates, bty = "n")
+}
+
+emp_vgm_st_SD <- variogram(MAXT ~ 1, data = SD_STFDF_train)
+plot(emp_vgm_st_SD)
+
+
+### 1. Seperate Model
+
+# Fit the model
+SD_separable_model <- vgmST("separable", temporalUnit = "days",
+                            space = vgm(psill = 0.99, model = "Gau", 
+                                        range = 30, nugget = 0.01),
+                            time = vgm(psill = 0.5, model = "Gau", 
+                                       range = 7, nugget = 0.5),
+                            sill = 8)
+SD_separable_fit <- fit.StVariogram(emp_vgm_st_SD, model = SD_separable_model)
+SD_separable_fit
+
+# check the difference
+plot(emp_vgm_st_SD, SD_separable_fit, diff = T, 
+     col = colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(1e2)[-c(70:100)])
+
+# Find the MSE
+sepMSE <- attr(SD_separable_fit, "optim")$value
+print(sepMSE) #[1] 0.3537874
+
+#make predictions
+pred_days <- c("2000-11-01", "2000-11-30", "2000-12-05")
+load("/content/drive/My Drive/RunR/data/sd_grid.RData")
+sd_grid=spTransform(sd_grid, CRS("+proj=longlat"))
+SD_grid=SpatialPoints(coordinates(sd_grid), CRS("+proj=longlat"))
+krige_grid_ST <- STF(sp = SD_grid, time = as.Date(pred_days))
+
+SDsep_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                      newdata = krige_grid_ST, 
+                      modelList = SD_separable_fit)
+
+range_pred_obs <- range(SDsep_pred@data$var1.pred, SD_STFDF[, pred_days]@data$MAXT)
+par(mfrow=c(1,3))
+for (i in 1:3){
+  pred_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SDsep_pred[, i]@data$var1.pred - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  obs_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SD_STFDF[, pred_days[i]]@data$MAXT - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  {
+    plot(SD_STFDF_train@sp,bg= obs_colors, col="black", cex = 2, pch = 21, main = pred_days[i])
+    points(SDsep_pred@sp, col = pred_colors, pch = 16, cex=0.1 )
+  }
+}
+
+### 2. metric Model
+SD_metric_model <- vgmST(stModel = "metric", 
+                         joint = vgm(psill = 0.9, model = "Gau", range = 30, nugget = 0.1), 
+                         sill = 6,
+                         stAni = 10)
+SD_metric_fit <- fit.StVariogram(emp_vgm_st_SD, model = SD_metric_model)
+SD_metric_fit
+
+# Check the difference
+plot(emp_vgm_st_SD, SD_metric_fit, diff = T, 
+     col = colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(1e2)[-c(70:100)])
+
+# Find the MSE
+metricMSE <- attr(SD_metric_fit, "optim")$value
+print(metricMSE) #[1] 0.3606783
+
+# make predictions
+SDmetric_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                         newdata = krige_grid_ST, 
+                         modelList = SD_metric_fit)
+
+range_pred_obs <- range(SDmetric_pred@data$var1.pred, SD_STFDF[, pred_days]@data$MAXT)
+par(mfrow=c(1,3))
+for (i in 1:3){
+  pred_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SDmetric_pred[, i]@data$var1.pred - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  obs_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SD_STFDF[, pred_days[i]]@data$MAXT - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  {
+    plot(SD_STFDF_train@sp,bg= obs_colors, col="black", cex = 2, pch = 21, main = pred_days[i])
+    points(SDmetric_pred@sp, col = pred_colors, pch = 16, cex=0.1 )
+  }
+}
+
+### 3. productSum Model
+
+# Fit the model
+SD_productSum_model <- vgmST(stModel = "productSum", 
+                             space = vgm(psill = 0.99, model = "Gau", 
+                                         range = 30, nugget = 0.01),
+                             time = vgm(psill = 0.5, model = "Gau", 
+                                        range = 4, nugget = 0.5),
+                             k = 1)
+SD_productSum_fit <- fit.StVariogram(emp_vgm_st_SD, model = SD_productSum_model)
+SD_productSum_fit
+
+# Check the difference
+plot(emp_vgm_st_SD, SD_productSum_fit, diff = T,
+     col = colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(1e2)[-c(70:100)])
+
+# Find the MSE
+prosumMSE <- attr(SD_productSum_fit, "optim")$value
+print(prosumMSE) #[1] 0.2339663
+
+# make predictions
+SDprosum_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                         newdata = krige_grid_ST, 
+                         modelList = SD_productSum_fit)
+
+range_pred_obs <- range(SDprosum_pred@data$var1.pred, SD_STFDF[, pred_days]@data$MAXT)
+par(mfrow=c(1,3))
+for (i in 1:3){
+  pred_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SDprosum_pred[, i]@data$var1.pred - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  obs_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SD_STFDF[, pred_days[i]]@data$MAXT - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  {
+    plot(SD_STFDF_train@sp,bg= obs_colors, col="black", cex = 2, pch = 21, main = pred_days[i])
+    points(SDprosum_pred@sp, col = pred_colors, pch = 16, cex=0.1 )
+  }
+}
+
+### 4. Simple-sum-metric model
+
+# Fit the model
+SD_simpleSumMetric_model <- vgmST(stModel="simpleSumMetric", 
+                                  space = vgm(psill = 3, model = "Gau", 
+                                              range = 14, nugget = 0),
+                                  time = vgm(psill = 2, model="Gau", range=4, nugget = 0),
+                                  joint = vgm(psill = 1, model = "Gau", range = 14, nugget = 0), 
+                                  nugget=2, stAni = 10)
+SD_simpleSumMetric_fit <- fit.StVariogram(emp_vgm_st_SD, model = SD_simpleSumMetric_model)
+SD_simpleSumMetric_fit
+
+# Check the difference
+plot(emp_vgm_st_SD, SD_simpleSumMetric_fit, diff = T,
+     col = colorRampPalette(RColorBrewer::brewer.pal(9, "RdBu"))(1e2)[-c(70:100)])
+
+# Find the MSE
+simpleSumMetricMSE <- attr(SD_simpleSumMetric_fit, "optim")$value
+print(simpleSumMetricMSE) #[1] 0.22433
+
+# make predictions
+SDsimpleSumMetric_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                                  newdata = krige_grid_ST, 
+                                  modelList = SD_simpleSumMetric_fit)
+
+range_pred_obs <- range(SDsimpleSumMetric_pred@data$var1.pred, SD_STFDF[, pred_days]@data$MAXT)
+par(mfrow=c(1,3))
+for (i in 1:3){
+  pred_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SDsimpleSumMetric_pred[, i]@data$var1.pred - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  obs_colors <- rgb(colorRamp(rev(RColorBrewer::brewer.pal(9, "RdYlBu")))((SD_STFDF[, pred_days[i]]@data$MAXT - range_pred_obs[1]) / diff(range_pred_obs))/255)
+  {
+    plot(SD_STFDF_train@sp,bg= obs_colors, col="black", cex = 2, pch = 21, main = pred_days[i])
+    points(SDsimpleSumMetric_pred@sp, col = pred_colors, pch = 16, cex=0.1 )
+  }
+}
+
+
+##########################################
+########  SSE comparison    ##############
+##########################################
+
+grid52=SpatialPoints(coordinates(b), CRS("+proj=longlat"))
+day_pr="2000-12-05"
+krige_grid52_ST <- STF(sp = grid52, time = as.Date(pred_days))
+
+#separable
+Sep_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                    newdata = krige_grid52_ST, 
+                    modelList = SD_separable_fit)
+Sep_SSE <- sum((Sep_pred@data$var1.pred - SD_STFDF[, "2000-12-05"]@data$MAXT)^2)
+print(Sep_SSE)
+
+#Metric
+Metric_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                       newdata = krige_grid52_ST, 
+                       modelList = SD_metric_fit)
+Metric_SSE <- sum((Metric_pred@data$var1.pred - SD_STFDF[, "2000-12-05"]@data$MAXT)^2)
+print(Metric_SSE)
+
+#product sum
+Prosum_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                       newdata = krige_grid52_ST, 
+                       modelList = SD_productSum_fit)
+Prosum_SSE <- sum((Prosum_pred@data$var1.pred - SD_STFDF[, "2000-12-05"]@data$MAXT)^2)
+print(Prosum_SSE)
+
+#Simple sum Metric
+SimSumMet_pred <- krigeST(formula = MAXT ~ 1, data = SD_STFDF_train, 
+                          newdata = krige_grid52_ST, 
+                          modelList = SD_simpleSumMetric_fit)
+SimSumMet_SSE <- sum((SimSumMet_pred@data$var1.pred - SD_STFDF[, "2000-12-05"]@data$MAXT)^2)
+print(SimSumMet_SSE)
