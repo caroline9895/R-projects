@@ -1,15 +1,8 @@
-# Once hospital received a critically ill patient, doctors would always give an emergency treatment to alleviate the patient’s 
-# suffering and save his/her life after getting a series of measurement results, like: the gender, age, shock type, systolic Pressure, 
-# diastolic pressure...etc. It is believed that those initial measurements help doctors give the optimal medical care. 
-# The question proposed here is: is there any relationships between the patient’s surviving rate and those initial measurement results?
+# Once hospital received a critically ill patient, doctors would always give an emergency treatment to alleviate the patient’s suffering and save his/her life after getting a series of measurement results, like: the gender, age, shock type, systolic Pressure, diastolic pressure...etc. It is believed that those initial measurements help doctors give the optimal medical care. The question proposed here is: is there any relationships between the patient’s surviving rate and those initial measurement results?
 
-# Physiological data of 112 critically ill patients were collected in Southern California. Each patient has 2 records. Record 1 contains 
-# SURVIVE and initial measurements. Record 2 contains SURVIVE and final measurements, which is just before death or discharge. Each record 
-# contains 21 variables. The variables are listed in Table 1A in appendices.
+# Physiological data of 112 critically ill patients were collected in Southern California. Each patient has 2 records. Record 1 contains SURVIVE and initial measurements. Record 2 contains SURVIVE and final measurements, which is just before death or discharge. Each record contains 21 variables. The variables are listed in Table 1A in appendices.
 
-# The main goal of this study is to find out the relationships between the patient’s surviving rate and those initial measurements data. 
-# Consequently, this study will focus on the Record 1, which is the initial measures dataset of the critically ill patients. Commercial 
-# oftware R 3.6.2 is utilized to handle those data.
+# The main goal of this study is to find out the relationships between the patient’s surviving rate and those initial measurements data. Consequently, this study will focus on the Record 1, which is the initial measures dataset of the critically ill patients. Commercial oftware R 3.6.2 is utilized to handle those data.
 
 
 # Load libraries
