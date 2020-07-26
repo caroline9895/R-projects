@@ -1,6 +1,6 @@
 # The data for this study come from a high resolution (4-k grid spacing) climate change simulation over northern Mexico, all of the continental U.S., and southern Canada using the Weather Research and Forecasting (WRF) model conducted by Liu et al.
 
-# Oour goal is to explore and evaluate the predictive performance of first and second order spatio-temporal models for maximum temperature observations within the San Diego City boundary using latitude, longitude and time as predictors.
+# Our goal is to explore and evaluate the predictive performance of first and second order spatio-temporal models for maximum temperature observations within the San Diego City boundary using latitude, longitude and time as predictors.
 
 ###############################################
 ######## Extracting the data in CA ############
